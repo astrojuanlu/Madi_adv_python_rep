@@ -10,6 +10,10 @@ from pandas.tseries.holiday import USFederalHolidayCalendar as calendar
 from scipy.stats import skew
 from xgboost import XGBRegressor
 
+## added
+from sklearn.linear_model import Ridge, Lasso
+import pickle
+
 from ie_bike_model.util import read_data, get_season, get_model_path
 
 
@@ -164,6 +168,43 @@ def train_xgboost(hour):
     return xgb
 
 
+# added
+def train_ridge(hour):
+    # Avoid modifying the original dataset at the cost of RAM
+    hour = hour.copy()
+    hour_d = pd.get_dummies(hour)
+    regex = re.compile(r"\[|\]|<", re.IGNORECASE)
+    hour_d.columns = [
+        regex.sub("_", col) if any(x in str(col) for x in set(("[", "]", "<"))) else col
+        for col in hour_d.columns.values
+    ]
+    hour_d = hour_d.select_dtypes(exclude="category")
+    hour_d_train_x, _, hour_d_train_y, _, = split_train_test(hour_d)
+
+    ridge = Ridge(alpha=1.0)
+
+    ridge.fit(hour_d_train_x, hour_d_train_y)
+    return ridge
+
+#added
+def train_lasso(hour):
+    # Avoid modifying the original dataset at the cost of RAM
+    hour = hour.copy()
+    hour_d = pd.get_dummies(hour)
+    regex = re.compile(r"\[|\]|<", re.IGNORECASE)
+    hour_d.columns = [
+        regex.sub("_", col) if any(x in str(col) for x in set(("[", "]", "<"))) else col
+        for col in hour_d.columns.values
+    ]
+    hour_d = hour_d.select_dtypes(exclude="category")
+    hour_d_train_x, _, hour_d_train_y, _, = split_train_test(hour_d)
+
+    lasso = Lasso()
+
+    lasso.fit(hour_d_train_x, hour_d_train_y)
+    return lasso
+
+
 def postprocess(hour):
     # Avoid modifying the original dataset at the cost of RAM
     hour = hour.copy()
@@ -172,18 +213,26 @@ def postprocess(hour):
     return hour
 
 
-def train_and_persist(model_dir=None, hour_path=None):
+def train_and_persist(model_dir=None, hour_path=None, model_name="xgboost"):
     hour = read_data(hour_path)
     hour = preprocess(hour)
     hour = dummify(hour)
     hour = postprocess(hour)
 
+    ##added
     # TODO: Implement other models?
-    model = train_xgboost(hour)
+    if model_name == "xgboost":
+        model = train_xgboost(hour)
+    elif model_name == "ridge":
+        model = train_ridge(hour)
+    elif model_name == "lasso":
+        model = train_lasso(hour)
+    else:
+        print("model should be equal to 'xgboost' or 'ridge' or 'lasso'")
 
-    model_path = get_model_path(model_dir)
-
+    model_path = get_model_path(model_dir, model_name)
     joblib.dump(model, model_path)
+
 
 
 def get_input_dict(parameters):
@@ -228,13 +277,13 @@ def get_input_dict(parameters):
     return df.iloc[0].to_dict()
 
 
-def predict(parameters, model_dir=None):
+def predict(parameters, model_dir=None, model="xgboost"):
     """Returns model prediction.
 
     """
-    model_path = get_model_path(model_dir)
+    model_path = get_model_path(model_dir, model)
     if not os.path.exists(model_path):
-        train_and_persist(model_dir)
+        train_and_persist(model_dir=model_dir, model_name=model)
 
     model = joblib.load(model_path)
 
